@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cikgu Mata Pro: Final Fixed</title>
+    <title>Cikgu Mata Pro: Final Layout</title>
     <style>
         :root { --bg: #f8fafc; --primary: #2563eb; --text: #0f172a; }
         body {
@@ -16,7 +16,7 @@
         canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
         canvas.drawing { cursor: crosshair; }
         
-        /* UI */
+        /* UI ELEMENTS */
         .overlay-top-left { position: absolute; top: 10px; left: 10px; pointer-events: none; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
         .badge { background: rgba(255,255,255,0.95); padding: 6px 12px; border-radius: 20px; border: 1px solid #ccc; font-size: 0.75rem; font-weight: 700; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -24,7 +24,6 @@
         .toolbar { position: absolute; bottom: 10px; right: 10px; display: flex; gap: 5px; background: #fff; padding: 5px; border-radius: 8px; border: 1px solid #cbd5e1; box-shadow: 0 4px 10px rgba(0,0,0,0.1); z-index: 10; }
         .tool-btn { width: 36px; height: 36px; border: 1px solid #e2e8f0; background: #fff; border-radius: 6px; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; cursor: pointer; }
         .tool-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
-        
         .color-tray { display: flex; align-items: center; gap: 5px; border-left: 1px solid #ddd; margin-left: 5px; padding-left: 5px; }
         .color-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
         .color-dot.selected { border-color: #333; transform: scale(1.1); }
@@ -73,8 +72,17 @@
     </div>
 
     <div class="controls-area">
+        <div class="card">
+            <h3>
+                <span>Object Distance ⚫</span>
+                <span id="distVal">Infinity</span>
+            </h3>
+            <input type="range" id="distSlider" min="0" max="100" step="0.5" value="100">
+            <div class="labels"><span>Very Close (5cm)</span><span>Infinity</span></div>
+        </div>
+
         <div class="card" style="border-left: 4px solid var(--primary);">
-            <h3><span>Lens Response (Auto)</span> <span id="accVal">0.00 D</span></h3>
+            <h3><span>Accommodation Response</span> <span id="accVal">0.00 D</span></h3>
             <div class="meter-container">
                 <div id="accBar" class="meter-bar"></div>
                 <div id="funcLimitMarker" class="meter-marker" title="Functional Limit"></div>
@@ -86,19 +94,6 @@
             <div class="labels" style="margin-top:2px; font-size:0.65rem; color:#ef4444;">
                 <span></span>
                 <span>(Blur > <span id="funcAmpVal">8.0</span> D)</span>
-            </div>
-        </div>
-
-        <div class="card">
-            <h3>Patient Profile</h3>
-            <select id="condSelect">
-                <option value="emmetropia">Emmetropia (0.00)</option>
-                <option value="myopia">Myopia (-2.50 D)</option>
-                <option value="hyperopia">Hyperopia (+2.50 D)</option>
-            </select>
-            <div class="row">
-                <label>Age:</label>
-                <input type="number" id="ageInput" value="40" style="width:50px; text-align:center;">
             </div>
         </div>
 
@@ -117,10 +112,18 @@
         </div>
 
         <div class="card">
-            <h3>Object Distance ⚫</h3>
-            <input type="range" id="distSlider" min="0" max="100" step="0.5" value="100">
-            <div class="labels"><span>5cm</span><span>Infinity</span></div>
+            <h3>Patient Profile</h3>
+            <select id="condSelect">
+                <option value="emmetropia">Emmetropia (0.00)</option>
+                <option value="myopia">Myopia (-2.50 D)</option>
+                <option value="hyperopia">Hyperopia (+2.50 D)</option>
+            </select>
+            <div class="row">
+                <label>Age:</label>
+                <input type="number" id="ageInput" value="40" style="width:50px; text-align:center;">
+            </div>
         </div>
+
         <div style="height: 50px;"></div> 
     </div>
 <script>
@@ -151,8 +154,8 @@
 
     let state = {
         condition: 'emmetropia', age: 40, 
-        maxAmp: 6.5,      // Physical Max
-        funcAmp: 3.0,     // Blur Point
+        maxAmp: 6.5,      
+        funcAmp: 3.0,     
         refError: 0,
         specPower: 0, addPower: 0,
         accEffort: 0, actualAcc: 0, objectDistD: 0, 
@@ -175,8 +178,7 @@
         state.maxAmp = Math.max(0, maxA);
         ui.maxAmpVal.innerText = state.maxAmp.toFixed(2);
 
-        // 2. Functional Blur Point (Your Custom Formula)
-        // 18.5 - 0.388 * Age
+        // 2. Functional Blur Point (New Formula)
         let funcA = 18.5 - (0.388 * state.age);
         state.funcAmp = Math.max(0, funcA);
         ui.funcAmpVal.innerText = state.funcAmp.toFixed(2);
@@ -420,7 +422,6 @@
         
         let focusX = retinaX;
         if (Math.abs(error) > 0.2) {
-            // + error = front focus (myopia), - error = back focus (hyperopia/presby)
             focusX = retinaX - (error * 8); 
         }
 
@@ -450,4 +451,3 @@
 </script>
 </body>
 </html>
-
