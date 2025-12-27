@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cikgu Mata Pro: Bifocal Logic</title>
+    <title>Cikgu Mata Pro: Corrected Max AA</title>
     <style>
         :root { --bg: #f8fafc; --primary: #2563eb; --text: #0f172a; }
         body {
@@ -162,7 +162,7 @@
         funcAmp: 3.0,     
         refError: 0,
         specPower: 0, addPower: 0,
-        activeAdd: 0, // The ADD currently being applied (0 or addPower)
+        activeAdd: 0, 
         accEffort: 0, 
         opticalAcc: 0, 
         objectDistD: 0, 
@@ -180,27 +180,16 @@
         state.age = safeAge;
         ui.ageInput.value = safeAge; 
 
-        // AGE LOGIC: SWITCH CASE for > 40, Formula for < 40
-        let aa = 0;
-        
-        if (state.age < 40) {
-            // Standard Hofstetter/Formula for young
-            aa = 18.5 - (0.3 * state.age);
-        } else {
-            // CLINICAL TABLE (Interpolated for smooth slider)
-            // 40: 2.0, 45: 1.5, 50: 1.5, 55: 1.0, 60: 1.0
-            if (state.age < 45) aa = 2.0 - ((state.age - 40) * (0.5/5)); // 40-45: 2.0 -> 1.5
-            else if (state.age < 50) aa = 1.5; // 45-50: 1.5
-            else if (state.age < 55) aa = 1.5 - ((state.age - 50) * (0.5/5)); // 50-55: 1.5 -> 1.0
-            else aa = 1.0; // 60+: 1.0
-        }
-        
-        state.maxAmp = Math.max(0, aa);
-        // Functional Limit is usually slightly less than Max, but for this specific 
-        // Presbyopia table logic, the table values ARE the functional limits.
-        state.funcAmp = state.maxAmp; 
-
+        // 1. MAX AA: Hofstetter's Average (18.5 - 0.3 * Age)
+        // At 40: 18.5 - 12 = 6.50 D. Correct.
+        let maxA = 18.5 - (0.3 * state.age);
+        state.maxAmp = Math.max(0, maxA);
         ui.maxAmpVal.innerText = state.maxAmp.toFixed(2);
+
+        // 2. FUNCTIONAL AA: Your "Problem" Formula (18.5 - 0.388 * Age)
+        // At 40: 18.5 - 15.52 = 2.98 D. (~3.00 D). Correct.
+        let funcA = 18.5 - (0.388 * state.age);
+        state.funcAmp = Math.max(0, funcA);
         ui.blurWarningText.innerText = "(Blur > " + state.funcAmp.toFixed(2) + " D)";
 
         // Marker Position
@@ -229,7 +218,7 @@
         let demand = (100 - val) / 5; // 0-20D
         state.objectDistD = demand;
 
-        // BIFOCAL LOGIC: ADD only applies if object distance < 40cm (Demand > 2.50D)
+        // BIFOCAL LOGIC: ADD active only if distance < 40cm (Demand > 2.50D)
         if (demand >= 2.50) {
             state.activeAdd = state.addPower;
             if(state.activeAdd > 0) ui.addBadge.style.display = 'flex';
@@ -244,12 +233,14 @@
         let needed = demand - netStatic - state.activeAdd;
         if (needed < 0) needed = 0;
 
-        // Effort (Bar) goes up to MaxAmp
-        // Optical (Rays) cap at FuncAmp (Blur limit)
-        state.accEffort = Math.min(needed, 15); // Allow bar to go into "impossible" red zone
+        // Visuals split: Effort vs Optics
+        // Effort can go up to MaxAmp (showing red zone)
+        // Optics stop at FuncAmp (showing blur rays)
+        
+        state.accEffort = Math.min(needed, state.maxAmp); 
         state.opticalAcc = Math.min(needed, state.funcAmp); 
         
-        // If within 0.1D, snap to needed for visual clarity
+        // If within 0.1D, snap opticalAcc to needed for crisp visual
         if (Math.abs(state.opticalAcc - needed) < 0.1) state.opticalAcc = needed;
 
         checkBlur(needed); 
@@ -260,13 +251,13 @@
         state.blurReason = '';
         state.isBlurred = false;
 
-        // 1. Functional Limit (Table Value)
-        if (originalNeeded > state.funcAmp + 0.1) { // 0.1 tolerance
+        // 1. Functional Limit (Blur)
+        if (originalNeeded > state.funcAmp + 0.1) { 
             state.isBlurred = true;
             state.blurReason = 'Need ' + originalNeeded.toFixed(2) + ' D';
         }
 
-        // 2. Focus Accuracy
+        // 2. Optical Focus Accuracy
         let netStatic = state.refError + state.specPower;
         let totalPower = netStatic + state.activeAdd + state.opticalAcc;
         let error = totalPower - state.objectDistD;
@@ -382,11 +373,10 @@
         
         // Specs
         if (state.specPower !== 0 || state.activeAdd !== 0) {
-            // Effective Power for Drawing: Spec + (ADD if active)
-            // Just for visual label, we show spec. If ADD active, maybe show it?
-            let visualPower = state.specPower;
-            // Draw
+            // Visual power = Spec + Active Add
+            let visualPower = state.specPower + state.activeAdd;
             let specX = cx - 90; let h = 35; ctx.beginPath();
+            
             if (visualPower < 0) {
                 ctx.moveTo(specX-3, -h); ctx.quadraticCurveTo(specX+2, 0, specX-3, h); 
                 ctx.lineTo(specX+3, h); ctx.quadraticCurveTo(specX-2, 0, specX+3, -h); ctx.lineTo(specX-3, -h);
@@ -433,15 +423,15 @@
         
         if (state.objectDistD < 0.1) {
             // Parallel
-            ctx.moveTo(rayStartX, -10); if(state.specPower!==0) ctx.lineTo(specX, -10); ctx.lineTo(corneaX, -15); ctx.lineTo(lensX, -20);
-            ctx.moveTo(rayStartX, 10); if(state.specPower!==0) ctx.lineTo(specX, 10); ctx.lineTo(corneaX, 15); ctx.lineTo(lensX, 20);
+            ctx.moveTo(rayStartX, -10); if(state.specPower!==0 || state.activeAdd!==0) ctx.lineTo(specX, -10); ctx.lineTo(corneaX, -15); ctx.lineTo(lensX, -20);
+            ctx.moveTo(rayStartX, 10); if(state.specPower!==0 || state.activeAdd!==0) ctx.lineTo(specX, 10); ctx.lineTo(corneaX, 15); ctx.lineTo(lensX, 20);
         } else {
             // Diverging
             ctx.moveTo(rayStartX, 0); 
-            if(state.specPower!==0) { ctx.lineTo(specX, -12); ctx.lineTo(corneaX, -15); } else { ctx.lineTo(corneaX, -15); }
+            if(state.specPower!==0 || state.activeAdd!==0) { ctx.lineTo(specX, -12); ctx.lineTo(corneaX, -15); } else { ctx.lineTo(corneaX, -15); }
             ctx.lineTo(lensX, -20);
             ctx.moveTo(rayStartX, 0); 
-            if(state.specPower!==0) { ctx.lineTo(specX, 12); ctx.lineTo(corneaX, 15); } else { ctx.lineTo(corneaX, 15); }
+            if(state.specPower!==0 || state.activeAdd!==0) { ctx.lineTo(specX, 12); ctx.lineTo(corneaX, 15); } else { ctx.lineTo(corneaX, 15); }
             ctx.lineTo(lensX, 20);
         }
         ctx.stroke();
