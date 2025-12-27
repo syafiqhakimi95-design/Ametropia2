@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cikgu Mata Pro: Final Fixed</title>
+    <style>
+        :root { --bg: #f8fafc; --primary: #2563eb; --text: #0f172a; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg); color: var(--text); margin: 0; height: 100vh;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        /* STAGE */
+        .stage-container { flex: 1; position: relative; background: #fff; border-bottom: 2px solid #cbd5e1; overflow: hidden; touch-action: none; }
+        canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+        canvas.drawing { cursor: crosshair; }
+        
+        /* UI */
+        .overlay-top-left { position: absolute; top: 10px; left: 10px; pointer-events: none; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
+        .badge { background: rgba(255,255,255,0.95); padding: 6px 12px; border-radius: 20px; border: 1px solid #ccc; font-size: 0.75rem; font-weight: 700; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .dot { width: 8px; height: 8px; border-radius: 50%; }
+        
+        .toolbar { position: absolute; bottom: 10px; right: 10px; display: flex; gap: 5px; background: #fff; padding: 5px; border-radius: 8px; border: 1px solid #cbd5e1; box-shadow: 0 4px 10px rgba(0,0,0,0.1); z-index: 10; }
+        .tool-btn { width: 36px; height: 36px; border: 1px solid #e2e8f0; background: #fff; border-radius: 6px; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .tool-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+        
+        .color-tray { display: flex; align-items: center; gap: 5px; border-left: 1px solid #ddd; margin-left: 5px; padding-left: 5px; }
+        .color-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+        .color-dot.selected { border-color: #333; transform: scale(1.1); }
+
+        /* CONTROLS */
+        .controls-area { flex: 0 0 auto; max-height: 50%; overflow-y: auto; background: var(--bg); padding: 15px; }
+        .card { background: #fff; padding: 12px; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+        h3 { margin: 0 0 8px 0; font-size: 0.9rem; color: var(--primary); display: flex; justify-content: space-between; align-items: center; }
+        input[type=range] { width: 100%; height: 30px; accent-color: var(--primary); cursor: pointer; }
+        .labels { display: flex; justify-content: space-between; font-size: 0.75rem; color: #64748b; font-weight: 600; }
+        select, input[type="number"] { padding: 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff; width: 100%; font-size: 0.9rem; }
+        .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 5px; }
+        .spec-controls { display: flex; gap: 10px; }
+        .spec-group { flex: 1; }
+        .spec-group label { font-size: 0.75rem; font-weight: 600; color: #64748b; display: block; margin-bottom: 4px; }
+        
+        /* Bar */
+        .meter-container { position: relative; height: 12px; background: #e2e8f0; border-radius: 6px; margin-top: 5px; overflow: hidden; }
+        .meter-bar { height: 100%; width: 0%; background: #2563eb; transition: width 0.1s; }
+        .meter-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(0,0,0,0.3); z-index: 2; }
+    </style>
+</head>
+<body>
+
+    <div class="stage-container" id="stage">
+        <canvas id="simCanvas"></canvas>
+        <div class="overlay-top-left">
+            <div class="badge">
+                <div id="statusDot" class="dot" style="background:green;"></div>
+                <span id="statusText">Parallel</span>
+            </div>
+            <div id="drawStatus" class="badge" style="display:none; color:#dc2626; border-color:#dc2626; background:#fff5f5;">
+                <span id="drawMsg">✎ Zoom Disabled</span>
+            </div>
+        </div>
+        <div class="toolbar">
+            <button class="tool-btn" id="btnReset">↺</button>
+            <button class="tool-btn" id="btnPen">✎</button>
+            <div class="color-tray" id="colorTray" style="display:none;">
+                <div class="color-dot selected" style="background:#ef4444;" data-c="#ef4444"></div>
+                <div class="color-dot" style="background:#2563eb;" data-c="#2563eb"></div>
+                <div class="color-dot" style="background:#000000;" data-c="#000000"></div>
+            </div>
+            <button class="tool-btn" id="btnClear">🗑️</button>
+        </div>
+    </div>
+
+    <div class="controls-area">
+        <div class="card" style="border-left: 4px solid var(--primary);">
+            <h3><span>Lens Response (Auto)</span> <span id="accVal">0.00 D</span></h3>
+            <div class="meter-container">
+                <div id="accBar" class="meter-bar"></div>
+                <div id="funcLimitMarker" class="meter-marker" title="Functional Limit"></div>
+            </div>
+            <div class="labels">
+                <span>0 D</span>
+                <span>Max AA: <span id="maxAmpVal">10.0</span> D</span>
+            </div>
+            <div class="labels" style="margin-top:2px; font-size:0.65rem; color:#ef4444;">
+                <span></span>
+                <span>(Blur > <span id="funcAmpVal">8.0</span> D)</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Patient Profile</h3>
+            <select id="condSelect">
+                <option value="emmetropia">Emmetropia (0.00)</option>
+                <option value="myopia">Myopia (-2.50 D)</option>
+                <option value="hyperopia">Hyperopia (+2.50 D)</option>
+            </select>
+            <div class="row">
+                <label>Age:</label>
+                <input type="number" id="ageInput" value="40" style="width:50px; text-align:center;">
+            </div>
+        </div>
+
+        <div class="card" id="specCard">
+            <h3>Correction (Rx)</h3>
+            <div class="spec-controls">
+                <div class="spec-group">
+                    <label>Spectacles</label>
+                    <input type="number" id="specInput" value="0.00" step="0.25" min="-10" max="10">
+                </div>
+                <div class="spec-group" id="addGroup" style="display:none;">
+                    <label>Add</label>
+                    <input type="number" id="addInput" value="0.00" step="0.25" min="0" max="4">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Object Distance ⚫</h3>
+            <input type="range" id="distSlider" min="0" max="100" step="0.5" value="100">
+            <div class="labels"><span>5cm</span><span>Infinity</span></div>
+        </div>
+        <div style="height: 50px;"></div> 
+    </div>
+<script>
+    const canvas = document.getElementById('simCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const ui = {
+        accBar: document.getElementById('accBar'),
+        funcLimitMarker: document.getElementById('funcLimitMarker'),
+        distSlider: document.getElementById('distSlider'),
+        condSelect: document.getElementById('condSelect'),
+        ageInput: document.getElementById('ageInput'),
+        accVal: document.getElementById('accVal'),
+        maxAmpVal: document.getElementById('maxAmpVal'),
+        funcAmpVal: document.getElementById('funcAmpVal'),
+        statusText: document.getElementById('statusText'),
+        statusDot: document.getElementById('statusDot'),
+        specInput: document.getElementById('specInput'),
+        addInput: document.getElementById('addInput'),
+        addGroup: document.getElementById('addGroup'),
+        btnPen: document.getElementById('btnPen'),
+        btnReset: document.getElementById('btnReset'),
+        btnClear: document.getElementById('btnClear'),
+        colorTray: document.getElementById('colorTray'),
+        drawStatus: document.getElementById('drawStatus'),
+        drawMsg: document.getElementById('drawMsg')
+    };
+
+    let state = {
+        condition: 'emmetropia', age: 40, 
+        maxAmp: 6.5,      // Physical Max
+        funcAmp: 3.0,     // Blur Point
+        refError: 0,
+        specPower: 0, addPower: 0,
+        accEffort: 0, actualAcc: 0, objectDistD: 0, 
+        isBlurred: false, blurReason: '' 
+    };
+
+    let camera = { scale: 1, x: 0, y: 0 };
+    let drawing = { active: false, color: '#ef4444', lines: [], currentLine: null };
+
+    // --- LOGIC ---
+    function updatePhysics() {
+        state.condition = ui.condSelect.value;
+        let safeAge = parseInt(ui.ageInput.value) || 20;
+        if(safeAge < 5) safeAge = 5; if(safeAge > 100) safeAge = 100;
+        state.age = safeAge;
+        ui.ageInput.value = safeAge; 
+
+        // 1. Max Amplitude (Hofstetter Mean)
+        let maxA = 18.5 - (0.3 * state.age);
+        state.maxAmp = Math.max(0, maxA);
+        ui.maxAmpVal.innerText = state.maxAmp.toFixed(2);
+
+        // 2. Functional Blur Point (Your Custom Formula)
+        // 18.5 - 0.388 * Age
+        let funcA = 18.5 - (0.388 * state.age);
+        state.funcAmp = Math.max(0, funcA);
+        ui.funcAmpVal.innerText = state.funcAmp.toFixed(2);
+
+        // Update Marker
+        let scaleMax = 15;
+        let markerPct = (state.funcAmp / scaleMax) * 100;
+        ui.funcLimitMarker.style.left = Math.min(100, markerPct) + "%";
+
+        // ADD visibility
+        if (state.age >= 40) {
+            ui.addGroup.style.display = 'block';
+        } else {
+            ui.addGroup.style.display = 'none'; state.addPower = 0; ui.addInput.value = 0;
+        }
+
+        if (state.condition === 'emmetropia') state.refError = 0;
+        if (state.condition === 'myopia') state.refError = 2.50;  
+        if (state.condition === 'hyperopia') state.refError = -2.50; 
+
+        state.specPower = parseFloat(ui.specInput.value) || 0;
+        state.addPower = parseFloat(ui.addInput.value) || 0;
+    }
+
+    function onObjectChange() {
+        updatePhysics();
+        let val = parseFloat(ui.distSlider.value);
+        let demand = (100 - val) / 5; // 0-20D
+        state.objectDistD = demand;
+
+        // Needed = Demand - (Static + Add)
+        let netStatic = state.refError + state.specPower;
+        let needed = demand - netStatic - state.addPower;
+        if (needed < 0) needed = 0;
+
+        // Visual "Use" allows going to MaxAmp
+        let clampedAcc = needed;
+        if (clampedAcc > state.maxAmp) clampedAcc = state.maxAmp;
+        
+        state.accEffort = clampedAcc;
+        state.actualAcc = clampedAcc;
+        
+        checkBlur(needed); 
+        render();
+    }
+
+    function checkBlur(originalNeeded) {
+        state.blurReason = '';
+        state.isBlurred = false;
+
+        // 1. Functional Limit (Blur starts here)
+        if (originalNeeded > state.funcAmp) {
+            state.isBlurred = true;
+            state.blurReason = 'Near Limit';
+        }
+        
+        // 2. Hard Max Limit
+        if (originalNeeded > state.maxAmp) {
+            state.actualAcc = state.maxAmp; 
+            state.blurReason = 'Max Amp';
+        }
+
+        // 3. Focus Accuracy
+        let netStatic = state.refError + state.specPower;
+        let totalPower = netStatic + state.addPower + state.actualAcc;
+        let error = totalPower - state.objectDistD;
+
+        if (Math.abs(error) > 0.20) {
+            state.isBlurred = true;
+            if (error > 0) state.blurReason = "Front Focus"; 
+            if (error < 0 && !state.blurReason) state.blurReason = "Back Focus"; 
+        }
+    }
+
+    // --- DRAWING & EVENTS ---
+    let evCache = []; let prevDiff = -1;
+    function getPtrPos(e) { const r = canvas.getBoundingClientRect(); return {x: e.clientX-r.left, y: e.clientY-r.top}; }
+    function toWorld(sx, sy) {
+        const r = canvas.getBoundingClientRect(); const w=r.width; const h=r.height;
+        return {x: (sx-(w/2)-camera.x)/camera.scale, y: (sy-(h/2)-camera.y)/camera.scale};
+    }
+
+    canvas.addEventListener('pointerdown', (e) => {
+        evCache.push(e); canvas.setPointerCapture(e.pointerId);
+        if (drawing.active && evCache.length === 1) {
+            const p = getPtrPos(e); drawing.currentLine = {color: drawing.color, points:[toWorld(p.x, p.y)]};
+            drawing.lines.push(drawing.currentLine); render();
+        }
+    });
+    canvas.addEventListener('pointermove', (e) => {
+        const i = evCache.findIndex((ev) => ev.pointerId === e.pointerId); if (i > -1) evCache[i] = e;
+        if (drawing.active) {
+            if (drawing.currentLine && evCache.length === 1) {
+                const p = getPtrPos(e); drawing.currentLine.points.push(toWorld(p.x, p.y)); render();
+            }
+        } else {
+            if (evCache.length === 2) {
+                const cur = Math.sqrt(Math.pow(evCache[1].clientX-evCache[0].clientX,2)+Math.pow(evCache[1].clientY-evCache[0].clientY,2));
+                if (prevDiff > 0) { let s = camera.scale + (cur - prevDiff)*0.01; if(s>0.5 && s<5) camera.scale=s; }
+                prevDiff = cur; render();
+            } else if (evCache.length === 1) {
+                camera.x += (e.movementX||0); camera.y += (e.movementY||0); render();
+            }
+        }
+    });
+    function ptrUp(e) {
+        const i = evCache.findIndex((ev) => ev.pointerId === e.pointerId); if (i > -1) evCache.splice(i, 1);
+        canvas.releasePointerCapture(e.pointerId);
+        if (evCache.length < 2) prevDiff = -1;
+        if (drawing.active && evCache.length === 0) drawing.currentLine = null;
+    }
+    canvas.addEventListener('pointerup', ptrUp); canvas.addEventListener('pointercancel', ptrUp);
+    canvas.addEventListener('wheel', (e) => { if(drawing.active)return; e.preventDefault(); 
+        let s = camera.scale + (e.deltaY > 0 ? -0.1 : 0.1); if(s>0.5 && s<5) { camera.scale=s; render(); } }, {passive:false});
+
+    ui.btnPen.addEventListener('click', () => {
+        drawing.active = !drawing.active;
+        if(drawing.active) {
+            ui.btnPen.classList.add('active'); ui.colorTray.style.display='flex'; ui.drawStatus.style.display='flex';
+            ui.drawMsg.innerText = "✎ Zoom Disabled"; canvas.classList.add('drawing');
+        } else {
+            ui.btnPen.classList.remove('active'); ui.colorTray.style.display='none'; ui.drawStatus.style.display='none';
+            canvas.classList.remove('drawing'); drawing.currentLine = null;
+        }
+    });
+    ui.btnClear.addEventListener('click', () => { drawing.lines = []; render(); });
+    ui.btnReset.addEventListener('click', () => { camera.scale=1; camera.x=0; camera.y=0; render(); });
+    
+    // Sliders & Inputs
+    ui.distSlider.addEventListener('input', onObjectChange);
+    ui.condSelect.addEventListener('change', () => { updatePhysics(); onObjectChange(); });
+    ui.ageInput.addEventListener('change', () => { updatePhysics(); onObjectChange(); });
+    ui.specInput.addEventListener('input', () => { updatePhysics(); onObjectChange(); });
+    ui.addInput.addEventListener('input', () => { updatePhysics(); onObjectChange(); });
+    
+    document.querySelectorAll('.color-dot').forEach(d => d.addEventListener('click', (e) => {
+        document.querySelectorAll('.color-dot').forEach(x => x.classList.remove('selected'));
+        e.target.classList.add('selected'); drawing.color = e.target.getAttribute('data-c');
+    }));
+    window.addEventListener('resize', render);
+
+    // --- RENDER ---
+    function render() {
+        ui.accVal.innerText = state.actualAcc.toFixed(2) + " D";
+        let dText = state.objectDistD <= 0.1 ? "Infinity" : (100/state.objectDistD).toFixed(0) + " cm";
+        
+        let barPct = Math.min(100, (state.actualAcc / 15) * 100);
+        ui.accBar.style.width = barPct + "%";
+        
+        if (state.actualAcc >= state.maxAmp - 0.1) ui.accBar.style.backgroundColor = "#dc2626"; // Max
+        else if (state.actualAcc > state.funcAmp) ui.accBar.style.backgroundColor = "#f59e0b"; // Functional limit
+        else ui.accBar.style.backgroundColor = "#2563eb"; // Safe
+
+        if (state.isBlurred) {
+            ui.statusText.innerText = "Blur (" + state.blurReason + ")";
+            ui.statusText.style.color = "#dc2626"; ui.statusDot.style.background = "#dc2626";
+        } else {
+            ui.statusText.innerText = "Clear (" + dText + ")";
+            ui.statusText.style.color = "#16a34a"; ui.statusDot.style.background = "#16a34a";
+        }
+
+        const dpr = window.devicePixelRatio || 1; const r = canvas.getBoundingClientRect();
+        canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+        ctx.resetTransform(); ctx.scale(dpr, dpr);
+        ctx.save();
+        ctx.translate(r.width/2, r.height/2); ctx.translate(camera.x, camera.y); ctx.scale(camera.scale, camera.scale);
+
+        const cx = 100; const cy = 0; const eyeRadius = 60;
+
+        // Eye
+        ctx.beginPath(); ctx.arc(cx, cy, eyeRadius, 0, Math.PI*2);
+        ctx.fillStyle = "#fff"; ctx.fill(); ctx.strokeStyle = "#334155"; ctx.lineWidth = 2; ctx.stroke();
+        // Cornea
+        ctx.beginPath(); ctx.arc(cx - 55, cy, 28, 1.4, 4.88);
+        ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.fill(); ctx.strokeStyle = "#94a3b8"; ctx.lineWidth = 1; ctx.stroke();
+        
+        // Specs
+        if (state.specPower !== 0) {
+            let specX = cx - 90; let h = 35; ctx.beginPath();
+            if (state.specPower < 0) {
+                ctx.moveTo(specX-3, -h); ctx.quadraticCurveTo(specX+2, 0, specX-3, h); 
+                ctx.lineTo(specX+3, h); ctx.quadraticCurveTo(specX-2, 0, specX+3, -h); ctx.lineTo(specX-3, -h);
+            } else {
+                ctx.moveTo(specX, -h); ctx.quadraticCurveTo(specX+6, 0, specX, h); 
+                ctx.moveTo(specX, -h); ctx.quadraticCurveTo(specX-6, 0, specX, h); 
+            }
+            ctx.fillStyle = "rgba(200, 230, 255, 0.5)"; ctx.fill(); ctx.strokeStyle = "#64748b"; ctx.lineWidth = 1.5; ctx.stroke();
+            ctx.fillStyle = "#2563eb"; ctx.font = "10px Arial"; ctx.textAlign = "center";
+            ctx.fillText((state.specPower>0?"+":"") + state.specPower.toFixed(2), specX, -h-5);
+        }
+
+        // Iris
+        ctx.beginPath();
+        ctx.moveTo(cx - 50, cy - 40); ctx.lineTo(cx - 50, cy - 15);
+        ctx.moveTo(cx - 50, cy + 40); ctx.lineTo(cx - 50, cy + 15);
+        ctx.strokeStyle = "#854d0e"; ctx.lineWidth = 5; ctx.stroke();
+
+        // Lens
+        let lensX = cx - 35;
+        let growth = state.actualAcc * 0.7; 
+        let lensThick = Math.min(5 + growth, 16); 
+        ctx.beginPath(); ctx.ellipse(lensX, cy, lensThick, 32, 0, 0, Math.PI*2);
+        ctx.fillStyle = "#bae6fd"; ctx.fill(); ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 2; ctx.stroke();
+
+        // Object
+        let slide = parseFloat(ui.distSlider.value) / 100;
+        let startX = -400; let endX = cx - 140;
+        let objX = endX - (slide * (endX - startX));
+        if (state.objectDistD < 0.1) {
+            ctx.fillStyle = "#334155"; ctx.font = "30px sans-serif"; ctx.fillText("∞", -350, cy + 10);
+        } else {
+            ctx.beginPath(); ctx.arc(objX, cy, 5, 0, Math.PI*2); ctx.fillStyle = "#000"; ctx.fill();
+        }
+
+        // Rays
+        let corneaX = cx - 60;
+        ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 2 / camera.scale; ctx.beginPath();
+        let rayStartX = state.objectDistD < 0.1 ? -1000 : objX;
+        let specX = cx - 90;
+        
+        if (state.objectDistD < 0.1) {
+            // Parallel
+            ctx.moveTo(rayStartX, -10); if(state.specPower!==0) ctx.lineTo(specX, -10); ctx.lineTo(corneaX, -15); ctx.lineTo(lensX, -20);
+            ctx.moveTo(rayStartX, 10); if(state.specPower!==0) ctx.lineTo(specX, 10); ctx.lineTo(corneaX, 15); ctx.lineTo(lensX, 20);
+        } else {
+            // Diverging
+            ctx.moveTo(rayStartX, 0); 
+            if(state.specPower!==0) { ctx.lineTo(specX, -12); ctx.lineTo(corneaX, -15); } else { ctx.lineTo(corneaX, -15); }
+            ctx.lineTo(lensX, -20);
+            ctx.moveTo(rayStartX, 0); 
+            if(state.specPower!==0) { ctx.lineTo(specX, 12); ctx.lineTo(corneaX, 15); } else { ctx.lineTo(corneaX, 15); }
+            ctx.lineTo(lensX, 20);
+        }
+        ctx.stroke();
+
+        // Retina Image
+        let retinaX = cx + eyeRadius;
+        let netStatic = state.refError + state.specPower;
+        let totalPower = netStatic + state.addPower + state.actualAcc;
+        let error = totalPower - state.objectDistD;
+        
+        let focusX = retinaX;
+        if (Math.abs(error) > 0.2) {
+            // + error = front focus (myopia), - error = back focus (hyperopia/presby)
+            focusX = retinaX - (error * 8); 
+        }
+
+        ctx.strokeStyle = "#3b82f6"; ctx.beginPath();
+        ctx.moveTo(lensX, cy - 20); ctx.lineTo(focusX, cy);
+        ctx.moveTo(lensX, cy + 20); ctx.lineTo(focusX, cy);
+        ctx.stroke();
+
+        ctx.beginPath();
+        if (state.isBlurred) {
+            ctx.fillStyle = "rgba(220, 38, 38, 0.6)"; ctx.arc(retinaX, cy, 6, 0, Math.PI*2);
+        } else {
+            ctx.fillStyle = "#16a34a"; ctx.arc(retinaX, cy, 3, 0, Math.PI*2);
+        }
+        ctx.fill();
+
+        ctx.lineCap = "round"; ctx.lineJoin = "round";
+        drawing.lines.forEach(l => {
+            ctx.beginPath(); ctx.strokeStyle = l.color; ctx.lineWidth = 3 / camera.scale;
+            if (l.points.length > 0) { ctx.moveTo(l.points[0].x, l.points[0].y); for(let i=1; i<l.points.length; i++) ctx.lineTo(l.points[i].x, l.points[i].y); }
+            ctx.stroke();
+        });
+        ctx.restore();
+    }
+
+    updatePhysics(); onObjectChange();
+</script>
+</body>
+</html>
+
