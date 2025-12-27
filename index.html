@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cikgu Mata Pro: Corrected Max AA</title>
+    <title>Cikgu Mata Pro: Final + DoF</title>
     <style>
         :root { --bg: #f8fafc; --primary: #2563eb; --text: #0f172a; }
         body {
@@ -77,7 +77,7 @@
     <div class="controls-area">
         <div class="card">
             <h3>
-                <span>Object Distance ⚫</span>
+                <span>Object Distance ⚫ <span id="distValCm" style="font-weight:normal; color:#64748b; margin-left:5px;">(Inf)</span></span>
                 <span id="distVal">Infinity</span>
             </h3>
             <input type="range" id="distSlider" min="0" max="100" step="0.5" value="100">
@@ -137,6 +137,7 @@
         accBar: document.getElementById('accBar'),
         funcLimitMarker: document.getElementById('funcLimitMarker'),
         distSlider: document.getElementById('distSlider'),
+        distValCm: document.getElementById('distValCm'), // New Ref
         condSelect: document.getElementById('condSelect'),
         ageInput: document.getElementById('ageInput'),
         accVal: document.getElementById('accVal'),
@@ -180,14 +181,13 @@
         state.age = safeAge;
         ui.ageInput.value = safeAge; 
 
-        // 1. MAX AA: Hofstetter's Average (18.5 - 0.3 * Age)
-        // At 40: 18.5 - 12 = 6.50 D. Correct.
+        // 1. MAX AA: Hofstetter's Average (Physical Limit)
         let maxA = 18.5 - (0.3 * state.age);
         state.maxAmp = Math.max(0, maxA);
         ui.maxAmpVal.innerText = state.maxAmp.toFixed(2);
 
-        // 2. FUNCTIONAL AA: Your "Problem" Formula (18.5 - 0.388 * Age)
-        // At 40: 18.5 - 15.52 = 2.98 D. (~3.00 D). Correct.
+        // 2. FUNCTIONAL AA: (Blur Point Logic)
+        // Formula: 18.5 - 0.388 * Age
         let funcA = 18.5 - (0.388 * state.age);
         state.funcAmp = Math.max(0, funcA);
         ui.blurWarningText.innerText = "(Blur > " + state.funcAmp.toFixed(2) + " D)";
@@ -218,6 +218,14 @@
         let demand = (100 - val) / 5; // 0-20D
         state.objectDistD = demand;
 
+        // Update Text Display (New Feature)
+        if (demand <= 0.1) {
+            ui.distValCm.innerText = "(Infinity)";
+        } else {
+            let cm = 100 / demand;
+            ui.distValCm.innerText = "(" + cm.toFixed(0) + " cm)";
+        }
+
         // BIFOCAL LOGIC: ADD active only if distance < 40cm (Demand > 2.50D)
         if (demand >= 2.50) {
             state.activeAdd = state.addPower;
@@ -233,14 +241,21 @@
         let needed = demand - netStatic - state.activeAdd;
         if (needed < 0) needed = 0;
 
-        // Visuals split: Effort vs Optics
-        // Effort can go up to MaxAmp (showing red zone)
-        // Optics stop at FuncAmp (showing blur rays)
-        
+        // Effort (Bar) goes up to MaxAmp
+        // Optical (Rays) cap at FuncAmp 
         state.accEffort = Math.min(needed, state.maxAmp); 
         state.opticalAcc = Math.min(needed, state.funcAmp); 
         
-        // If within 0.1D, snap opticalAcc to needed for crisp visual
+        // Depth of Focus Buffer Logic
+        // If the 'needed' power is slightly above FuncAmp but within DoF,
+        // we artificially boost opticalAcc to match 'needed' so it looks clear.
+        // Depth of Focus = 0.75 D
+        let dof = 0.75;
+        if (needed > state.funcAmp && needed <= (state.funcAmp + dof)) {
+            state.opticalAcc = needed; // Pretend we can accommodate this due to DoF
+        }
+
+        // Snap logic
         if (Math.abs(state.opticalAcc - needed) < 0.1) state.opticalAcc = needed;
 
         checkBlur(needed); 
@@ -250,9 +265,13 @@
     function checkBlur(originalNeeded) {
         state.blurReason = '';
         state.isBlurred = false;
+        
+        // Depth of Focus: 0.75 D
+        // Blur only starts if we exceed (Functional Limit + DoF)
+        let dof = 0.75;
 
-        // 1. Functional Limit (Blur)
-        if (originalNeeded > state.funcAmp + 0.1) { 
+        // 1. Functional Limit Check
+        if (originalNeeded > (state.funcAmp + dof)) { 
             state.isBlurred = true;
             state.blurReason = 'Need ' + originalNeeded.toFixed(2) + ' D';
         }
@@ -344,9 +363,12 @@
         let barPct = Math.min(100, (state.accEffort / 15) * 100);
         ui.accBar.style.width = barPct + "%";
         
-        // Color Logic
-        if (state.accEffort > state.funcAmp) ui.accBar.style.backgroundColor = "#dc2626"; // Red (Exceeds ability)
-        else ui.accBar.style.backgroundColor = "#2563eb"; // Blue (OK)
+        // Color Logic: Use DoF for coloring
+        let dof = 0.75;
+        if (state.accEffort >= state.maxAmp - 0.1) ui.accBar.style.backgroundColor = "#dc2626"; // Max Red
+        else if (state.accEffort > (state.funcAmp + dof)) ui.accBar.style.backgroundColor = "#dc2626"; // Blur Red
+        else if (state.accEffort > state.funcAmp) ui.accBar.style.backgroundColor = "#f59e0b"; // Orange (Buffer)
+        else ui.accBar.style.backgroundColor = "#2563eb"; // Blue (Safe)
 
         if (state.isBlurred) {
             ui.statusText.innerText = "Blur (" + state.blurReason + ")";
@@ -373,7 +395,6 @@
         
         // Specs
         if (state.specPower !== 0 || state.activeAdd !== 0) {
-            // Visual power = Spec + Active Add
             let visualPower = state.specPower + state.activeAdd;
             let specX = cx - 90; let h = 35; ctx.beginPath();
             
@@ -398,9 +419,9 @@
         ctx.moveTo(cx - 50, cy + 40); ctx.lineTo(cx - 50, cy + 15);
         ctx.strokeStyle = "#854d0e"; ctx.lineWidth = 5; ctx.stroke();
 
-        // Lens - Uses Physical Effort
+        // Lens
         let lensX = cx - 35;
-        let growth = Math.min(state.accEffort, 10) * 0.7; // Cap growth visual
+        let growth = Math.min(state.accEffort, 10) * 0.7; 
         let lensThick = Math.min(5 + growth, 16); 
         ctx.beginPath(); ctx.ellipse(lensX, cy, lensThick, 32, 0, 0, Math.PI*2);
         ctx.fillStyle = "#bae6fd"; ctx.fill(); ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 2; ctx.stroke();
@@ -415,7 +436,7 @@
             ctx.beginPath(); ctx.arc(objX, cy, 5, 0, Math.PI*2); ctx.fillStyle = "#000"; ctx.fill();
         }
 
-        // Rays - Uses Functional Optical Acc
+        // Rays
         let corneaX = cx - 60;
         ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 2 / camera.scale; ctx.beginPath();
         let rayStartX = state.objectDistD < 0.1 ? -1000 : objX;
