@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cikgu Mata Pro: Final Layout</title>
+    <title>Cikgu Mata Pro: Final Clinical Logic</title>
     <style>
         :root { --bg: #f8fafc; --primary: #2563eb; --text: #0f172a; }
         body {
@@ -106,7 +106,7 @@
                 </div>
                 <div class="spec-group" id="addGroup" style="display:none;">
                     <label>Add</label>
-                    <input type="number" id="addInput" value="0.00" step="0.25" min="0" max="4">
+                    <input type="number" id="addInput" value="0.00" step="0.25" min="0" max="4" placeholder="e.g. +1.00">
                 </div>
             </div>
         </div>
@@ -158,7 +158,9 @@
         funcAmp: 3.0,     
         refError: 0,
         specPower: 0, addPower: 0,
-        accEffort: 0, actualAcc: 0, objectDistD: 0, 
+        accEffort: 0, // Bar Value (Physical Effort)
+        opticalAcc: 0, // Ray Value (Functional Result)
+        objectDistD: 0, 
         isBlurred: false, blurReason: '' 
     };
 
@@ -178,7 +180,7 @@
         state.maxAmp = Math.max(0, maxA);
         ui.maxAmpVal.innerText = state.maxAmp.toFixed(2);
 
-        // 2. Functional Blur Point (New Formula)
+        // 2. Functional Blur Point (18.5 - 0.388 * Age)
         let funcA = 18.5 - (0.388 * state.age);
         state.funcAmp = Math.max(0, funcA);
         ui.funcAmpVal.innerText = state.funcAmp.toFixed(2);
@@ -214,13 +216,16 @@
         let needed = demand - netStatic - state.addPower;
         if (needed < 0) needed = 0;
 
-        // Visual "Use" allows going to MaxAmp
-        let clampedAcc = needed;
-        if (clampedAcc > state.maxAmp) clampedAcc = state.maxAmp;
+        // TWEAK 3: DECOUPLED LOGIC
+        // Effort (Bar) goes up to MaxAmp (shows strain)
+        // Optics (Rays) cap at FuncAmp (shows blur)
         
-        state.accEffort = clampedAcc;
-        state.actualAcc = clampedAcc;
+        state.accEffort = Math.min(needed, state.maxAmp); 
+        state.opticalAcc = Math.min(needed, state.funcAmp); // Focal point stops at blur limit!
         
+        // If needed exceeds MaxAmp, then effort is also maxed out
+        if (needed > state.maxAmp) state.accEffort = state.maxAmp;
+
         checkBlur(needed); 
         render();
     }
@@ -232,24 +237,28 @@
         // 1. Functional Limit (Blur starts here)
         if (originalNeeded > state.funcAmp) {
             state.isBlurred = true;
-            state.blurReason = 'Near Limit';
+            // TWEAK 1: Show Number
+            state.blurReason = 'Need ' + originalNeeded.toFixed(2) + ' D';
         }
         
         // 2. Hard Max Limit
         if (originalNeeded > state.maxAmp) {
-            state.actualAcc = state.maxAmp; 
-            state.blurReason = 'Max Amp';
+            state.blurReason = 'Max Amp Limit';
         }
 
         // 3. Focus Accuracy
+        // Using opticalAcc to calculate error ensures visual blur matches status
         let netStatic = state.refError + state.specPower;
-        let totalPower = netStatic + state.addPower + state.actualAcc;
+        let totalPower = netStatic + state.addPower + state.opticalAcc;
         let error = totalPower - state.objectDistD;
 
         if (Math.abs(error) > 0.20) {
             state.isBlurred = true;
-            if (error > 0) state.blurReason = "Front Focus"; 
-            if (error < 0 && !state.blurReason) state.blurReason = "Back Focus"; 
+            // If we haven't set a reason yet (e.g. standard myopic blur)
+            if (!state.blurReason.includes('Need') && !state.blurReason.includes('Max')) {
+                if (error > 0) state.blurReason = "Front Focus"; 
+                if (error < 0) state.blurReason = "Back Focus";
+            }
         }
     }
 
@@ -322,14 +331,14 @@
 
     // --- RENDER ---
     function render() {
-        ui.accVal.innerText = state.actualAcc.toFixed(2) + " D";
+        ui.accVal.innerText = state.accEffort.toFixed(2) + " D"; // Show Effort on Text
         let dText = state.objectDistD <= 0.1 ? "Infinity" : (100/state.objectDistD).toFixed(0) + " cm";
         
-        let barPct = Math.min(100, (state.actualAcc / 15) * 100);
+        let barPct = Math.min(100, (state.accEffort / 15) * 100);
         ui.accBar.style.width = barPct + "%";
         
-        if (state.actualAcc >= state.maxAmp - 0.1) ui.accBar.style.backgroundColor = "#dc2626"; // Max
-        else if (state.actualAcc > state.funcAmp) ui.accBar.style.backgroundColor = "#f59e0b"; // Functional limit
+        if (state.accEffort >= state.maxAmp - 0.1) ui.accBar.style.backgroundColor = "#dc2626"; // Max
+        else if (state.accEffort > state.funcAmp) ui.accBar.style.backgroundColor = "#f59e0b"; // Functional limit
         else ui.accBar.style.backgroundColor = "#2563eb"; // Safe
 
         if (state.isBlurred) {
@@ -376,9 +385,9 @@
         ctx.moveTo(cx - 50, cy + 40); ctx.lineTo(cx - 50, cy + 15);
         ctx.strokeStyle = "#854d0e"; ctx.lineWidth = 5; ctx.stroke();
 
-        // Lens
+        // Lens - Uses Effort (Physical)
         let lensX = cx - 35;
-        let growth = state.actualAcc * 0.7; 
+        let growth = state.accEffort * 0.7; 
         let lensThick = Math.min(5 + growth, 16); 
         ctx.beginPath(); ctx.ellipse(lensX, cy, lensThick, 32, 0, 0, Math.PI*2);
         ctx.fillStyle = "#bae6fd"; ctx.fill(); ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 2; ctx.stroke();
@@ -393,7 +402,7 @@
             ctx.beginPath(); ctx.arc(objX, cy, 5, 0, Math.PI*2); ctx.fillStyle = "#000"; ctx.fill();
         }
 
-        // Rays
+        // Rays - Uses OpticalAcc (Functional)
         let corneaX = cx - 60;
         ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 2 / camera.scale; ctx.beginPath();
         let rayStartX = state.objectDistD < 0.1 ? -1000 : objX;
@@ -417,7 +426,8 @@
         // Retina Image
         let retinaX = cx + eyeRadius;
         let netStatic = state.refError + state.specPower;
-        let totalPower = netStatic + state.addPower + state.actualAcc;
+        // Key: Focus uses opticalAcc
+        let totalPower = netStatic + state.addPower + state.opticalAcc;
         let error = totalPower - state.objectDistD;
         
         let focusX = retinaX;
