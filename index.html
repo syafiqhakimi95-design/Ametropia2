@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cikgu Mata Pro: Final + DoF</title>
+    <title>Cikgu Mata Pro: Pinhole Effect</title>
     <style>
         :root { --bg: #f8fafc; --primary: #2563eb; --text: #0f172a; }
         body {
@@ -63,14 +63,16 @@
             </div>
         </div>
         <div class="toolbar">
-            <button class="tool-btn" id="btnReset">↺</button>
-            <button class="tool-btn" id="btnPen">✎</button>
+            <button class="tool-btn" id="btnReset" title="Reset View">↺</button>
+            <button class="tool-btn" id="btnPupil" title="Toggle Pinhole (Depth of Focus)" style="font-size:1.4rem;">◎</button>
+            <div style="width:1px; background:#ddd; margin:0 2px;"></div>
+            <button class="tool-btn" id="btnPen" title="Draw">✎</button>
             <div class="color-tray" id="colorTray" style="display:none;">
                 <div class="color-dot selected" style="background:#ef4444;" data-c="#ef4444"></div>
                 <div class="color-dot" style="background:#2563eb;" data-c="#2563eb"></div>
                 <div class="color-dot" style="background:#000000;" data-c="#000000"></div>
             </div>
-            <button class="tool-btn" id="btnClear">🗑️</button>
+            <button class="tool-btn" id="btnClear" title="Clear Ink" style="margin-left:5px;">🗑️</button>
         </div>
     </div>
 
@@ -137,7 +139,7 @@
         accBar: document.getElementById('accBar'),
         funcLimitMarker: document.getElementById('funcLimitMarker'),
         distSlider: document.getElementById('distSlider'),
-        distValCm: document.getElementById('distValCm'), // New Ref
+        distValCm: document.getElementById('distValCm'),
         condSelect: document.getElementById('condSelect'),
         ageInput: document.getElementById('ageInput'),
         accVal: document.getElementById('accVal'),
@@ -151,6 +153,7 @@
         addGroup: document.getElementById('addGroup'),
         btnPen: document.getElementById('btnPen'),
         btnReset: document.getElementById('btnReset'),
+        btnPupil: document.getElementById('btnPupil'), // New Button
         btnClear: document.getElementById('btnClear'),
         colorTray: document.getElementById('colorTray'),
         drawStatus: document.getElementById('drawStatus'),
@@ -159,15 +162,11 @@
 
     let state = {
         condition: 'emmetropia', age: 40, 
-        maxAmp: 6.5,      
-        funcAmp: 3.0,     
-        refError: 0,
-        specPower: 0, addPower: 0,
-        activeAdd: 0, 
-        accEffort: 0, 
-        opticalAcc: 0, 
-        objectDistD: 0, 
-        isBlurred: false, blurReason: '' 
+        maxAmp: 6.5, funcAmp: 3.0,     
+        refError: 0, specPower: 0, addPower: 0, activeAdd: 0, 
+        accEffort: 0, opticalAcc: 0, objectDistD: 0, 
+        isBlurred: false, blurReason: '',
+        pupilConstricted: false // New State
     };
 
     let camera = { scale: 1, x: 0, y: 0 };
@@ -187,17 +186,14 @@
         ui.maxAmpVal.innerText = state.maxAmp.toFixed(2);
 
         // 2. FUNCTIONAL AA: (Blur Point Logic)
-        // Formula: 18.5 - 0.388 * Age
         let funcA = 18.5 - (0.388 * state.age);
         state.funcAmp = Math.max(0, funcA);
         ui.blurWarningText.innerText = "(Blur > " + state.funcAmp.toFixed(2) + " D)";
 
-        // Marker Position
         let scaleMax = 15;
         let markerPct = (state.funcAmp / scaleMax) * 100;
         ui.funcLimitMarker.style.left = Math.min(100, markerPct) + "%";
 
-        // ADD UI Visibility
         if (state.age >= 40) {
             ui.addGroup.style.display = 'block';
         } else {
@@ -218,44 +214,34 @@
         let demand = (100 - val) / 5; // 0-20D
         state.objectDistD = demand;
 
-        // Update Text Display (New Feature)
-        if (demand <= 0.1) {
-            ui.distValCm.innerText = "(Infinity)";
-        } else {
-            let cm = 100 / demand;
-            ui.distValCm.innerText = "(" + cm.toFixed(0) + " cm)";
-        }
+        if (demand <= 0.1) ui.distValCm.innerText = "(Infinity)";
+        else ui.distValCm.innerText = "(" + (100 / demand).toFixed(0) + " cm)";
 
-        // BIFOCAL LOGIC: ADD active only if distance < 40cm (Demand > 2.50D)
         if (demand >= 2.50) {
             state.activeAdd = state.addPower;
-            if(state.activeAdd > 0) ui.addBadge.style.display = 'flex';
-            else ui.addBadge.style.display = 'none';
+            ui.addBadge.style.display = state.activeAdd > 0 ? 'flex' : 'none';
         } else {
             state.activeAdd = 0;
             ui.addBadge.style.display = 'none';
         }
 
-        // Needed = Demand - (Static + ActiveAdd)
         let netStatic = state.refError + state.specPower;
         let needed = demand - netStatic - state.activeAdd;
         if (needed < 0) needed = 0;
 
-        // Effort (Bar) goes up to MaxAmp
-        // Optical (Rays) cap at FuncAmp 
         state.accEffort = Math.min(needed, state.maxAmp); 
         state.opticalAcc = Math.min(needed, state.funcAmp); 
         
-        // Depth of Focus Buffer Logic
-        // If the 'needed' power is slightly above FuncAmp but within DoF,
-        // we artificially boost opticalAcc to match 'needed' so it looks clear.
-        // Depth of Focus = 0.75 D
-        let dof = 0.75;
+        // --- DEPTH OF FOCUS LOGIC ---
+        // Base DoF = 0.75D. Pinhole DoF = 2.50D.
+        let dof = state.pupilConstricted ? 2.50 : 0.75;
+
+        // If needed power is outside functional limit but inside DoF buffer,
+        // snap optical result to clear.
         if (needed > state.funcAmp && needed <= (state.funcAmp + dof)) {
-            state.opticalAcc = needed; // Pretend we can accommodate this due to DoF
+            state.opticalAcc = needed; 
         }
 
-        // Snap logic
         if (Math.abs(state.opticalAcc - needed) < 0.1) state.opticalAcc = needed;
 
         checkBlur(needed); 
@@ -266,12 +252,11 @@
         state.blurReason = '';
         state.isBlurred = false;
         
-        // Depth of Focus: 0.75 D
-        // Blur only starts if we exceed (Functional Limit + DoF)
-        let dof = 0.75;
+        // Use the same DoF variable for consistency
+        let dof = state.pupilConstricted ? 2.50 : 0.75;
 
-        // 1. Functional Limit Check
-        if (originalNeeded > (state.funcAmp + dof)) { 
+        // 1. Functional Limit Check (with DoF buffer)
+        if (originalNeeded > (state.funcAmp + dof + 0.05)) { 
             state.isBlurred = true;
             state.blurReason = 'Need ' + originalNeeded.toFixed(2) + ' D';
         }
@@ -288,7 +273,7 @@
         }
     }
 
-    // --- DRAWING & EVENTS ---
+    // --- EVENTS ---
     let evCache = []; let prevDiff = -1;
     function getPtrPos(e) { const r = canvas.getBoundingClientRect(); return {x: e.clientX-r.left, y: e.clientY-r.top}; }
     function toWorld(sx, sy) {
@@ -329,6 +314,13 @@
     canvas.addEventListener('wheel', (e) => { if(drawing.active)return; e.preventDefault(); 
         let s = camera.scale + (e.deltaY > 0 ? -0.1 : 0.1); if(s>0.5 && s<5) { camera.scale=s; render(); } }, {passive:false});
 
+    // New Pupil Button Listener
+    ui.btnPupil.addEventListener('click', () => {
+        state.pupilConstricted = !state.pupilConstricted;
+        ui.btnPupil.classList.toggle('active', state.pupilConstricted);
+        onObjectChange(); // Recalculate with new DoF
+    });
+
     ui.btnPen.addEventListener('click', () => {
         drawing.active = !drawing.active;
         if(drawing.active) {
@@ -363,12 +355,12 @@
         let barPct = Math.min(100, (state.accEffort / 15) * 100);
         ui.accBar.style.width = barPct + "%";
         
-        // Color Logic: Use DoF for coloring
-        let dof = 0.75;
-        if (state.accEffort >= state.maxAmp - 0.1) ui.accBar.style.backgroundColor = "#dc2626"; // Max Red
-        else if (state.accEffort > (state.funcAmp + dof)) ui.accBar.style.backgroundColor = "#dc2626"; // Blur Red
-        else if (state.accEffort > state.funcAmp) ui.accBar.style.backgroundColor = "#f59e0b"; // Orange (Buffer)
-        else ui.accBar.style.backgroundColor = "#2563eb"; // Blue (Safe)
+        // Color Logic based on DoF
+        let dof = state.pupilConstricted ? 2.50 : 0.75;
+        if (state.accEffort >= state.maxAmp - 0.1) ui.accBar.style.backgroundColor = "#dc2626"; 
+        else if (state.accEffort > (state.funcAmp + dof)) ui.accBar.style.backgroundColor = "#dc2626"; 
+        else if (state.accEffort > state.funcAmp) ui.accBar.style.backgroundColor = "#f59e0b"; 
+        else ui.accBar.style.backgroundColor = "#2563eb"; 
 
         if (state.isBlurred) {
             ui.statusText.innerText = "Blur (" + state.blurReason + ")";
@@ -413,10 +405,11 @@
             ctx.fillText(label, specX, -h-5);
         }
 
-        // Iris
+        // Iris (Changes with Pinhole)
+        let irisGap = state.pupilConstricted ? 5 : 15; // Narrower gap
         ctx.beginPath();
-        ctx.moveTo(cx - 50, cy - 40); ctx.lineTo(cx - 50, cy - 15);
-        ctx.moveTo(cx - 50, cy + 40); ctx.lineTo(cx - 50, cy + 15);
+        ctx.moveTo(cx - 50, cy - 40); ctx.lineTo(cx - 50, cy - irisGap);
+        ctx.moveTo(cx - 50, cy + 40); ctx.lineTo(cx - 50, cy + irisGap);
         ctx.strokeStyle = "#854d0e"; ctx.lineWidth = 5; ctx.stroke();
 
         // Lens
@@ -436,24 +429,28 @@
             ctx.beginPath(); ctx.arc(objX, cy, 5, 0, Math.PI*2); ctx.fillStyle = "#000"; ctx.fill();
         }
 
-        // Rays
+        // Rays (Narrower if pinhole active)
         let corneaX = cx - 60;
         ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 2 / camera.scale; ctx.beginPath();
         let rayStartX = state.objectDistD < 0.1 ? -1000 : objX;
         let specX = cx - 90;
-        
+        // Ray aperture targets
+        let cHit = state.pupilConstricted ? 5 : 15;
+        let lHit = state.pupilConstricted ? 7 : 20;
+        let pSource = state.pupilConstricted ? 4 : 10;
+
         if (state.objectDistD < 0.1) {
             // Parallel
-            ctx.moveTo(rayStartX, -10); if(state.specPower!==0 || state.activeAdd!==0) ctx.lineTo(specX, -10); ctx.lineTo(corneaX, -15); ctx.lineTo(lensX, -20);
-            ctx.moveTo(rayStartX, 10); if(state.specPower!==0 || state.activeAdd!==0) ctx.lineTo(specX, 10); ctx.lineTo(corneaX, 15); ctx.lineTo(lensX, 20);
+            ctx.moveTo(rayStartX, -pSource); if(state.specPower!==0 || state.activeAdd!==0) ctx.lineTo(specX, -pSource); ctx.lineTo(corneaX, -cHit); ctx.lineTo(lensX, -lHit);
+            ctx.moveTo(rayStartX, pSource); if(state.specPower!==0 || state.activeAdd!==0) ctx.lineTo(specX, pSource); ctx.lineTo(corneaX, cHit); ctx.lineTo(lensX, lHit);
         } else {
             // Diverging
             ctx.moveTo(rayStartX, 0); 
-            if(state.specPower!==0 || state.activeAdd!==0) { ctx.lineTo(specX, -12); ctx.lineTo(corneaX, -15); } else { ctx.lineTo(corneaX, -15); }
-            ctx.lineTo(lensX, -20);
+            if(state.specPower!==0 || state.activeAdd!==0) { ctx.lineTo(specX, -cHit*0.8); ctx.lineTo(corneaX, -cHit); } else { ctx.lineTo(corneaX, -cHit); }
+            ctx.lineTo(lensX, -lHit);
             ctx.moveTo(rayStartX, 0); 
-            if(state.specPower!==0 || state.activeAdd!==0) { ctx.lineTo(specX, 12); ctx.lineTo(corneaX, 15); } else { ctx.lineTo(corneaX, 15); }
-            ctx.lineTo(lensX, 20);
+            if(state.specPower!==0 || state.activeAdd!==0) { ctx.lineTo(specX, cHit*0.8); ctx.lineTo(corneaX, cHit); } else { ctx.lineTo(corneaX, cHit); }
+            ctx.lineTo(lensX, lHit);
         }
         ctx.stroke();
 
