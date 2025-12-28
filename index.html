@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cikgu Mata Pro: Pinhole Effect</title>
+    <title>Cikgu Mata Pro: Final Pinhole Logic</title>
     <style>
         :root { --bg: #f8fafc; --primary: #2563eb; --text: #0f172a; }
         body {
@@ -57,6 +57,9 @@
             </div>
             <div id="addBadge" class="badge" style="display:none; color:#2563eb; border-color:#2563eb; background:#eff6ff;">
                 <span>Reading Add Active</span>
+            </div>
+            <div id="pupilBadge" class="badge" style="display:none; color:#b45309; border-color:#b45309; background:#fffbeb;">
+                <span>◎ Pupil Miosis</span>
             </div>
             <div id="drawStatus" class="badge" style="display:none; color:#dc2626; border-color:#dc2626; background:#fff5f5;">
                 <span id="drawMsg">✎ Zoom Disabled</span>
@@ -148,12 +151,13 @@
         statusText: document.getElementById('statusText'),
         statusDot: document.getElementById('statusDot'),
         addBadge: document.getElementById('addBadge'),
+        pupilBadge: document.getElementById('pupilBadge'), // New Ref
         specInput: document.getElementById('specInput'),
         addInput: document.getElementById('addInput'),
         addGroup: document.getElementById('addGroup'),
         btnPen: document.getElementById('btnPen'),
         btnReset: document.getElementById('btnReset'),
-        btnPupil: document.getElementById('btnPupil'), // New Button
+        btnPupil: document.getElementById('btnPupil'), 
         btnClear: document.getElementById('btnClear'),
         colorTray: document.getElementById('colorTray'),
         drawStatus: document.getElementById('drawStatus'),
@@ -166,7 +170,7 @@
         refError: 0, specPower: 0, addPower: 0, activeAdd: 0, 
         accEffort: 0, opticalAcc: 0, objectDistD: 0, 
         isBlurred: false, blurReason: '',
-        pupilConstricted: false // New State
+        pupilConstricted: false 
     };
 
     let camera = { scale: 1, x: 0, y: 0 };
@@ -180,12 +184,12 @@
         state.age = safeAge;
         ui.ageInput.value = safeAge; 
 
-        // 1. MAX AA: Hofstetter's Average (Physical Limit)
+        // 1. MAX AA (Hofstetter)
         let maxA = 18.5 - (0.3 * state.age);
         state.maxAmp = Math.max(0, maxA);
         ui.maxAmpVal.innerText = state.maxAmp.toFixed(2);
 
-        // 2. FUNCTIONAL AA: (Blur Point Logic)
+        // 2. FUNCTIONAL AA (Blur point logic)
         let funcA = 18.5 - (0.388 * state.age);
         state.funcAmp = Math.max(0, funcA);
         ui.blurWarningText.innerText = "(Blur > " + state.funcAmp.toFixed(2) + " D)";
@@ -232,12 +236,8 @@
         state.accEffort = Math.min(needed, state.maxAmp); 
         state.opticalAcc = Math.min(needed, state.funcAmp); 
         
-        // --- DEPTH OF FOCUS LOGIC ---
-        // Base DoF = 0.75D. Pinhole DoF = 2.50D.
+        // Depth of Focus Logic
         let dof = state.pupilConstricted ? 2.50 : 0.75;
-
-        // If needed power is outside functional limit but inside DoF buffer,
-        // snap optical result to clear.
         if (needed > state.funcAmp && needed <= (state.funcAmp + dof)) {
             state.opticalAcc = needed; 
         }
@@ -252,10 +252,9 @@
         state.blurReason = '';
         state.isBlurred = false;
         
-        // Use the same DoF variable for consistency
         let dof = state.pupilConstricted ? 2.50 : 0.75;
 
-        // 1. Functional Limit Check (with DoF buffer)
+        // 1. Functional Limit Check
         if (originalNeeded > (state.funcAmp + dof + 0.05)) { 
             state.isBlurred = true;
             state.blurReason = 'Need ' + originalNeeded.toFixed(2) + ' D';
@@ -314,11 +313,13 @@
     canvas.addEventListener('wheel', (e) => { if(drawing.active)return; e.preventDefault(); 
         let s = camera.scale + (e.deltaY > 0 ? -0.1 : 0.1); if(s>0.5 && s<5) { camera.scale=s; render(); } }, {passive:false});
 
-    // New Pupil Button Listener
+    // Pupil Button Listener
     ui.btnPupil.addEventListener('click', () => {
         state.pupilConstricted = !state.pupilConstricted;
         ui.btnPupil.classList.toggle('active', state.pupilConstricted);
-        onObjectChange(); // Recalculate with new DoF
+        // Toggle Badge
+        ui.pupilBadge.style.display = state.pupilConstricted ? 'flex' : 'none';
+        onObjectChange(); 
     });
 
     ui.btnPen.addEventListener('click', () => {
@@ -334,7 +335,6 @@
     ui.btnClear.addEventListener('click', () => { drawing.lines = []; render(); });
     ui.btnReset.addEventListener('click', () => { camera.scale=1; camera.x=0; camera.y=0; render(); });
     
-    // Sliders & Inputs
     ui.distSlider.addEventListener('input', onObjectChange);
     ui.condSelect.addEventListener('change', () => { updatePhysics(); onObjectChange(); });
     ui.ageInput.addEventListener('change', () => { updatePhysics(); onObjectChange(); });
@@ -355,7 +355,6 @@
         let barPct = Math.min(100, (state.accEffort / 15) * 100);
         ui.accBar.style.width = barPct + "%";
         
-        // Color Logic based on DoF
         let dof = state.pupilConstricted ? 2.50 : 0.75;
         if (state.accEffort >= state.maxAmp - 0.1) ui.accBar.style.backgroundColor = "#dc2626"; 
         else if (state.accEffort > (state.funcAmp + dof)) ui.accBar.style.backgroundColor = "#dc2626"; 
@@ -405,8 +404,8 @@
             ctx.fillText(label, specX, -h-5);
         }
 
-        // Iris (Changes with Pinhole)
-        let irisGap = state.pupilConstricted ? 5 : 15; // Narrower gap
+        // Iris
+        let irisGap = state.pupilConstricted ? 5 : 15; // Variable aperture
         ctx.beginPath();
         ctx.moveTo(cx - 50, cy - 40); ctx.lineTo(cx - 50, cy - irisGap);
         ctx.moveTo(cx - 50, cy + 40); ctx.lineTo(cx - 50, cy + irisGap);
@@ -429,12 +428,12 @@
             ctx.beginPath(); ctx.arc(objX, cy, 5, 0, Math.PI*2); ctx.fillStyle = "#000"; ctx.fill();
         }
 
-        // Rays (Narrower if pinhole active)
+        // Rays
         let corneaX = cx - 60;
         ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 2 / camera.scale; ctx.beginPath();
         let rayStartX = state.objectDistD < 0.1 ? -1000 : objX;
         let specX = cx - 90;
-        // Ray aperture targets
+        // Aperture control
         let cHit = state.pupilConstricted ? 5 : 15;
         let lHit = state.pupilConstricted ? 7 : 20;
         let pSource = state.pupilConstricted ? 4 : 10;
@@ -466,8 +465,9 @@
         }
 
         ctx.strokeStyle = "#3b82f6"; ctx.beginPath();
-        ctx.moveTo(lensX, cy - 20); ctx.lineTo(focusX, cy);
-        ctx.moveTo(lensX, cy + 20); ctx.lineTo(focusX, cy);
+        // Blue Rays match Orange Rays aperture
+        ctx.moveTo(lensX, -lHit); ctx.lineTo(focusX, 0);
+        ctx.moveTo(lensX, lHit); ctx.lineTo(focusX, 0);
         ctx.stroke();
 
         ctx.beginPath();
